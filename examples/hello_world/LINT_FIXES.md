@@ -19,6 +19,7 @@ Importantly, two of these four issues (P2 and P3) **conflict with the Flutter re
 - [Issue 2 — `unnecessary_async`: `async` without `await`](#issue-2--unnecessary_async-async-without-await)
 - [Issue 3 — `avoid_types_on_closure_parameters`: redundant `WidgetTester` annotation](#issue-3--avoid_types_on_closure_parameters-redundant-widgettester-annotation)
 - [Issue 4 — `prefer_final_parameters`: missing `final` on closure parameter](#issue-4--prefer_final_parameters-missing-final-on-closure-parameter)
+- [Git history deep dive: how did this bug survive 6 years?](#git-history-deep-dive-how-did-this-bug-survive-6-years)
 - [How these issues were detected](#how-these-issues-were-detected)
   - [Two analysis tools](#two-analysis-tools)
   - [Why the default lints didn't catch these](#why-the-default-lints-didnt-catch-these)
@@ -428,6 +429,95 @@ Issues 3 and 4 applied to the same parameter, so the combined fix changed `(Widg
 ### Deprecation note
 
 As of Dart 3.11, `prefer_final_parameters` is deprecated and will be removed in a future SDK release. The recommended replacement is `parameter_assignments`, which flags the *reassignment* rather than the missing `final` keyword. The effect is similar — preventing accidental parameter reassignment — but `parameter_assignments` does not require the visual overhead of `final` on every parameter. However, the Flutter repo also disables `parameter_assignments`, so neither form of this protection is active.
+
+---
+
+## Git history deep dive: how did this bug survive 6 years?
+
+The `driver.close()` bug (Issue 1) has been present in the Flutter repo since the file was first created. A deep analysis of git history reveals not just how it survived, but that the Flutter team is **actively working to enable `unawaited_futures` repo-wide** — and the examples were simply missed in that ongoing effort.
+
+### Origin: February 2020
+
+The bug was introduced in commit `9ba4eb04dda` on 2020-02-24 by Nurhan Turgut in PR #51003 ("[web] Smoke tests for web engine"):
+
+```dart
+// Original code from 2020
+tearDownAll(() async {
+  if (driver != null) {
+    driver.close();  // no await — bug from day one
+  }
+});
+```
+
+The null check (`driver != null`) was later removed during the null-safety migration (#75022), but `driver.close()` never gained an `await` through any of the 23 commits that touched this file over the following 6 years.
+
+### The same bug in three places
+
+The identical pattern exists in `platform_channel/test_driver/button_tap_test.dart` and `platform_channel_swift/test_driver/button_tap_test.dart`. The `platform_channel` version dates back even further — to 2017 (commit `d274888be60`, PR #9018 "Rename platform_services to platform_channel"). All three have survived untouched on upstream master as of March 2026.
+
+### Why it was never caught: the `AnimationController` tradeoff
+
+The root `analysis_options.yaml` has disabled `unawaited_futures` since at least 2020, with the comment:
+
+> `# - unawaited_futures # too many false positives, especially with the way AnimationController works`
+
+The problem is that `AnimationController.forward()`, `.reverse()`, `.animateTo()`, etc. all return `TickerFuture`, and in Flutter code it is idiomatic to call them without `await`:
+
+```dart
+// This is correct Flutter code — you don't await animations
+_controller.forward();
+```
+
+With `unawaited_futures` enabled, every one of these call sites would produce a lint warning, creating enormous noise across the codebase. The Flutter team made a pragmatic decision to disable the rule entirely rather than annotate thousands of legitimate fire-and-forget animation calls.
+
+The collateral damage: genuine bugs like `driver.close()` without `await` went undetected.
+
+### The solution: `@awaitNotRequired` (in progress)
+
+The Flutter team is actively solving this problem. Issue [#168555](https://github.com/flutter/flutter/issues/168555) ("Use `@awaitNotRequired` in Flutter SDK") tracks the effort to:
+
+1. **Annotate legitimate fire-and-forget APIs** with `@awaitNotRequired` from `package:meta` (version 1.17.0). This tells the `unawaited_futures` lint "this function is designed to be called without `await`."
+
+2. **Add `await` to callsites that actually need it** — the real bugs.
+
+3. **Enable `unawaited_futures` repo-wide** once the annotations and fixes are in place.
+
+PR [#181513](https://github.com/flutter/flutter/pull/181513) ("Add @awaitNotRequired annotation to flutter sdk") is the main implementation PR. It has spawned several child PRs that have already landed on master:
+
+| Commit | PR | Description |
+|--------|-----|-------------|
+| `0fcce5ef36b` | #181513 | Add `@awaitNotRequired` to `AnimationController.forward()`, `.reverse()`, `.animateTo()`, `.animateBack()`, `.toggle()`, `Navigator.push()`, `ScrollController.animateTo()`, and ~70 other APIs |
+| `b0eae2a4af2` | #182983 | Add `await` to flutter_test callsites |
+| `3b618442ab3` | #182868 | Add `await` to `BasicMessageChannel.send` callsites |
+| `1e02e1052e4` | #183334 | Add `await` or ignore to flutter_driver callsites |
+| `c777faa6db8` | #183413 | Add `await` to more flutter/flutter callsites |
+| `fd89d205aa4` | #183479 | Add `await` to dev/ callsites |
+| `41bc812d883` | #183487 | Add `await` to flutter/test callsites |
+
+**Crucially, none of these commits touched the `examples/` directory.** The three `driver.close()` bugs in `hello_world`, `platform_channel`, and `platform_channel_swift` were missed in this otherwise thorough cleanup.
+
+### Timeline
+
+| Date | Event |
+|------|-------|
+| 2017 | `platform_channel` test driver created with `driver.close()` (no await) |
+| 2020-02 | `hello_world` smoke test created with same pattern (PR #51003) |
+| ~2020 | `unawaited_futures` disabled repo-wide due to `AnimationController` false positives |
+| 2025 | Dart SDK adds `@awaitNotRequired` annotation in `package:meta` 1.17.0 |
+| 2026-01 | PR #181513 begins annotating Flutter SDK APIs with `@awaitNotRequired` |
+| 2026-01 to 2026-03 | Child PRs land, adding `await` to hundreds of callsites across the repo |
+| 2026-03 | The `examples/` directory is not included in the cleanup — bugs remain |
+
+### Conclusion
+
+The `driver.close()` bug is not a case of "Flutter evolved and this became wrong." It was always wrong — `FlutterDriver.close()` has returned `Future<void>` since its creation. The bug survived because:
+
+1. **No lint catches it.** `unawaited_futures` has been disabled repo-wide since ~2020.
+2. **The test still passes.** Dropping the `Future` from `close()` in `tearDownAll` doesn't cause a test failure — it just means the cleanup doesn't complete reliably.
+3. **The file is rarely modified.** Only 23 commits in 6 years, and none focused on async correctness.
+4. **The ongoing cleanup missed examples.** The `@awaitNotRequired` effort (PR #181513) systematically fixed callsites in `packages/`, `dev/`, and `test/`, but not `examples/`.
+
+Our fix aligns with the direction the Flutter team is already heading. Once `@awaitNotRequired` annotations are complete and `unawaited_futures` is enabled repo-wide, this bug would be caught automatically — but the examples need the fix now.
 
 ---
 
