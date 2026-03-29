@@ -702,3 +702,78 @@ Both `unawaited_futures` and `discarded_futures` are disabled repo-wide due to f
 **3. Style guide says "give types to all parameters, even in closures" but the repo's `omit_obvious_local_variable_types` rule is enabled.**
 
 The style guide at line 802 says to always give types to closure parameters. But the root config enables `omit_obvious_local_variable_types` (line 148), which omits types when they are obvious from context. These two positions create tension — the style guide says "always type," but the linter says "omit when obvious." The resolution appears to be: local variables may omit obvious types, but closure parameters should always be typed. This distinction is not explicitly documented.
+
+---
+
+## Proposed GitHub issues
+
+### Issue 1: `examples/` missed in `@awaitNotRequired` cleanup — 3 unawaited `driver.close()` bugs
+
+**Repo:** `flutter/flutter`
+**Labels:** `a: tests`, `d: examples`
+**Related:** #168555, #181513
+
+**Title:** `examples/: unawaited driver.close() in 3 test_driver files (missed by #181513 cleanup)`
+
+**Body:**
+
+PR #181513 and its child PRs (#182983, #183334, #183413, #183479, #183487) systematically added `await` to unawaited callsites across `packages/`, `dev/`, and `test/`. The `examples/` directory was not included.
+
+Three files have the same bug — `driver.close()` without `await` in `tearDownAll`:
+
+- `examples/hello_world/test_driver/smoke_web_engine_test.dart:28` — since #51003 (2020-02)
+- `examples/platform_channel/test_driver/button_tap_test.dart:17` — since #9018 (2017)
+- `examples/platform_channel_swift/test_driver/button_tap_test.dart:17` — since #9018 (2017)
+
+`FlutterDriver.close()` returns `Future<void>`. Without `await`, the WebDriver connection is not reliably closed before the test process exits.
+
+**Fix:** Add `await` before `driver.close()` in all three files.
+
+---
+
+### Issue 2: `examples/` has 15 additional `discarded_futures` callsites to audit
+
+**Repo:** `flutter/flutter`
+**Labels:** `a: tests`, `d: examples`
+**Related:** #168555, #181513
+
+**Title:** `examples/: 15 discarded_futures callsites to audit as part of #181513 rollout`
+
+**Body:**
+
+With `unawaited_futures` and `discarded_futures` enabled, 15 additional callsites in `examples/` produce warnings. Some may be legitimate fire-and-forget patterns that need `unawaited()` or `@awaitNotRequired`; others may be bugs.
+
+- `flutter_view/lib/main.dart:58` — `discarded_futures`
+- `image_list/lib/main.dart:115` — `unawaited_futures`
+- `image_list/lib/main.dart:173,180` — `discarded_futures` (×2)
+- `layers/rendering/spinning_square.dart:52` — `discarded_futures`
+- `layers/services/isolate.dart:128,133` — `discarded_futures` (×2)
+- `multiple_windows/lib/app/main_window.dart:114` — `unnecessary_async`
+- `multiple_windows/lib/app/main_window.dart:279` — `discarded_futures`
+- `multiple_windows/lib/app/dialog_window_edit_dialog.dart:15` — `discarded_futures`
+- `multiple_windows/lib/app/regular_window_edit_dialog.dart:15` — `discarded_futures`
+- `multiple_windows/lib/app/rotated_wire_cube.dart:30` — `discarded_futures`
+- `multiple_windows/lib/app/tooltip_window_edit_dialog.dart:17` — `discarded_futures`
+
+Each needs individual assessment: `await`, `unawaited()`, or `@awaitNotRequired` on the called API.
+
+---
+
+### Issue 3: Inconsistent `analysis_options.yaml` across examples — local analysis weaker than CI
+
+**Repo:** `flutter/flutter`
+**Labels:** `d: examples`, `a: quality`
+
+**Title:** `examples/: local analysis_options.yaml inconsistent — only 1 of 12 inherits root config`
+
+**Body:**
+
+CI enforces the root `analysis_options.yaml` (176 rules) on all examples. But local `dart analyze` from within an example directory uses whatever local config exists. Current state:
+
+- **1 example** inherits root config: `layers` (`include: ../../analysis_options.yaml`)
+- **2 examples** use `flutter_lints` (~67 rules): `api`, `multiple_windows`
+- **7 examples** have no config (~30 default rules): `flutter_view`, `image_list`, `platform_channel`, `platform_channel_swift`, `platform_view`, `splash`, `texture`
+
+Developers working in these directories see fewer warnings locally than CI would catch. IDEs show incomplete analysis.
+
+**Fix:** Add `include: ../../analysis_options.yaml` to each example's `analysis_options.yaml`, following `layers`' existing pattern.
