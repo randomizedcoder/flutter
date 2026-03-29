@@ -29,6 +29,8 @@ Available examples include:
   channel](platform_channel) but the iOS version is in Swift and there is no
   Android version.
 
+- **Web Telemetry** The [web telemetry app](web_telemetry) demonstrates how to collect frame timings, navigation events, and custom performance spans in a Flutter web application using only built-in APIs.
+
 ## Notes
 
 Note on Gradle wrapper files in `.gitignore`:

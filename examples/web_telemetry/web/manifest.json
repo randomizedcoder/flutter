@@ -1,0 +1,8 @@
+{
+  "name": "Web Telemetry Example",
+  "short_name": "Telemetry",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff"
+}

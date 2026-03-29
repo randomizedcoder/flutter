@@ -65,6 +65,7 @@ workspace:
   - examples/platform_view
   - examples/splash
   - examples/texture
+  - examples/web_telemetry
   - packages/flutter
   - packages/flutter_driver
   - packages/flutter_goldens
