@@ -11,6 +11,7 @@
 #   nix flake check                  — verify all Nix expressions evaluate
 #   nix run .#dart-analyze           — dart analyze in isolated temp dir
 #   nix run .#flutter-analyze        — flutter analyze in isolated temp dir
+#   nix run .#dart-code-linter       — dart_code_linter (metrics, unused code, etc.)
 #   nix run .#dart-format-check      — verify dart format compliance
 #
 # Utilities:
@@ -44,6 +45,9 @@
         flutter-analyze = import ../nix/packages/flutter-analyze.nix {
           inherit pkgs flutter shellFragments;
         };
+        dart-code-linter = import ../nix/packages/dart-code-linter.nix {
+          inherit pkgs flutter shellFragments;
+        };
         dart-format-check = import ../nix/packages/dart-format-check.nix {
           inherit pkgs flutter;
           projectName = "hello_world";
@@ -69,6 +73,7 @@
     checks = forAllSystems (pkgs: flutter:
       let packages = allPackages.${pkgs.stdenv.hostPlatform.system}; in {
         dart-analyze = packages.dart-analyze;
+        dart-code-linter = packages.dart-code-linter;
         dart-format-check = packages.dart-format-check;
         flutter-analyze = packages.flutter-analyze;
       }

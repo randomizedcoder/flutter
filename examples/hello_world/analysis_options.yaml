@@ -178,3 +178,29 @@ linter:
     - use_string_buffers
     - use_test_throws_matchers
     - use_truncating_division
+
+dart_code_linter:
+  extends:
+    - package:dart_code_linter/presets/all.yaml
+    - package:dart_code_linter/presets/metrics_recommended.yaml
+  metrics-exclude:
+    - test/**
+    - test_driver/**
+  rules:
+    # Disabled: conflicts with sort_constructors_first — Dart convention
+    # places constructors before fields.
+    - member-ordering: false
+    # Disabled: main() is a top-level function, idiomatic for entry points
+    # and conditional imports.
+    - prefer-static-class: false
+    # Disabled: arabic.dart doesn't define an Arabic class; files group
+    # related entry points.
+    - prefer-match-file-name: false
+    # Disabled: arabic.dart intentionally uses Arabic script to
+    # demonstrate RTL text rendering.
+    - avoid-non-ascii-symbols: false
+    # Disabled: runApp() return value is intentionally unused.
+    - avoid-ignoring-return-values: false
+    # Disabled: too noisy for example code — spacing values and constants
+    # are clear from context.
+    - no-magic-number: false
