@@ -26,10 +26,41 @@
 
   outputs = { self, nixpkgs, ... }:
   let
-    lib = import ./nix/lib.nix { inherit nixpkgs; };
+    lib = import ../nix/lib.nix { inherit nixpkgs; };
     inherit (lib) forAllSystems;
+
+    # Build shellFragments with PROJECT_NAME baked in for the shared scripts.
+    mkShellFragments = ''export PROJECT_NAME="web_telemetry"'' + "\n"
+      + builtins.readFile ../nix/shell-fragments/copy-to-work-dir.sh;
+    flutterServerFragment = builtins.readFile ../nix/shell-fragments/flutter-server.sh;
+
     allPackages = forAllSystems (pkgs: flutter:
-      import ./nix/packages { inherit pkgs flutter; }
+      let
+        shellFragments = {
+          copyToWorkDir = mkShellFragments;
+          flutterServer = flutterServerFragment;
+        };
+      in {
+        dart-analyze = import ../nix/packages/dart-analyze.nix {
+          inherit pkgs flutter shellFragments;
+        };
+        flutter-analyze = import ../nix/packages/flutter-analyze.nix {
+          inherit pkgs flutter shellFragments;
+        };
+        dart-code-linter = import ../nix/packages/dart-code-linter.nix {
+          inherit pkgs flutter shellFragments;
+        };
+        dart-format-check = import ../nix/packages/dart-format-check.nix {
+          inherit pkgs flutter;
+          projectName = "web_telemetry";
+        };
+        nix-test = import ./nix/packages/nix-test.nix {
+          inherit pkgs flutter;
+        };
+        smoke-test = import ./nix/packages/smoke-test.nix {
+          inherit pkgs flutter shellFragments;
+        };
+      }
     );
   in {
     packages = allPackages;
@@ -64,7 +95,18 @@
     );
 
     devShells = forAllSystems (pkgs: flutter: {
-      default = import ./nix/shell.nix { inherit pkgs flutter; };
+      default = import ../nix/shell.nix {
+        inherit pkgs flutter;
+        name = "web-telemetry";
+        helpText = ''
+          echo "Run the example:"
+          echo "  flutter run -d chrome            # debug mode"
+          echo "  flutter run -d chrome --release  # release mode (batched frame timings)"
+          echo ""
+          echo "Run tests:"
+          echo "  flutter test"
+        '';
+      };
     });
   };
 }
