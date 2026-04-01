@@ -661,7 +661,7 @@ Affected functions (lines 145, 188, 195, 204, 212, 220, 228, 237):
 
 ---
 
-### 7.2 Deep Dive: `uninitMemberVar` — 9 findings (cppcheck)
+### 7.2 Deep Dive: `uninitMemberVar` — 9 findings (cppcheck) — [flutter/flutter#184490](https://github.com/flutter/flutter/issues/184490)
 
 | File | Member | Verdict |
 |------|--------|---------|
