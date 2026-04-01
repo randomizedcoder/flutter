@@ -22,12 +22,14 @@ std::filesystem::path GetExecutableDirectory() {
   std::filesystem::path executable_path(buffer);
   return executable_path.remove_filename();
 #elif defined(__linux__)
-  char buffer[PATH_MAX + 1];
+  char buffer[PATH_MAX];
+  // flawfinder: ignore — /proc/self/exe is kernel-managed, not a TOCTOU risk
   ssize_t length = readlink("/proc/self/exe", buffer, sizeof(buffer));
-  if (length > PATH_MAX) {
+  if (length <= 0) {
     return std::filesystem::path();
   }
-  std::filesystem::path executable_path(std::string(buffer, length));
+  std::filesystem::path executable_path(
+      std::string(buffer, static_cast<size_t>(length)));
   return executable_path.remove_filename();
 #else
   return std::filesystem::path();
