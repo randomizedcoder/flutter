@@ -10,23 +10,11 @@ std::ostream& operator<<(std::ostream& os, const DlStrokeCap& cap) {
     case DlStrokeCap::kRound:  return os << "Cap::kRound";
     case DlStrokeCap::kSquare: return os << "Cap::kSquare";
   }
-  // BUG: no default/fallthrough return — UB if cap is not one of the above
+  // BUG: no return here — UB if cap is not one of the above
 }
 ```
 
-**Correct pattern already used in the same file** (line 244):
-```cpp
-std::ostream& operator<<(std::ostream& os, const DlFilterMode& mode) {
-  switch (mode) {
-    case DlFilterMode::kNearest: return os << "FilterMode::kNearest";
-    case DlFilterMode::kLinear:  return os << "FilterMode::kLinear";
-
-    default: return os << "FilterMode::????";  // ← correct: has default
-  }
-}
-```
-
-**Fix** — add a default case to each of the 9 switches:
+**Fix** — add a return **after** the switch (not as a `default` case):
 ```cpp
 std::ostream& operator<<(std::ostream& os, const DlStrokeCap& cap) {
   switch (cap) {
@@ -34,10 +22,14 @@ std::ostream& operator<<(std::ostream& os, const DlStrokeCap& cap) {
     case DlStrokeCap::kRound:  return os << "Cap::kRound";
     case DlStrokeCap::kSquare: return os << "Cap::kSquare";
   }
-  FML_UNREACHABLE();  // or: default: return os << "Cap::???";
+  return os << "Cap::???";  // after the switch — preserves -Wswitch warnings
 }
 ```
 
-All 9 functions follow the identical pattern — switch on enum, return in each case, no default/fallthrough.
+**Why not `default:`?** Per [Abseil Tip #147](https://abseil.io/tips/147) and the Flutter engine style, `default` should be avoided in switches on enums because it suppresses `-Wswitch` compiler warnings. If `DlStrokeCap` gains a new value, the "return after switch" approach will produce a compiler warning about the unhandled case, while `default:` would silently swallow it.
+
+**Note**: The same file has 2 existing functions (`DisplayListOpCategory` line 110, `DlFilterMode` line 244) that use `default:` — these are also inconsistent with this preferred pattern.
+
+All 9 affected functions follow the identical pattern — switch on enum, return in each case, no fallthrough return after the switch.
 
 </details>

@@ -722,7 +722,7 @@ zircon_dart_byte_array_t* zircon_dart_byte_array_create(uint32_t size) {
 
 ---
 
-### 7.5 Deep Dive: Missing shebangs — 4 findings (shellcheck SC2148)
+### 7.5 Deep Dive: Missing shebangs — 4 findings (shellcheck SC2148) — [flutter/flutter#184493](https://github.com/flutter/flutter/issues/184493)
 
 | File | Notes |
 |------|-------|
@@ -731,7 +731,72 @@ zircon_dart_byte_array_t* zircon_dart_byte_array_create(uint32_t size) {
 | `engine/src/flutter/tools/vscode_workspace/merge.sh` | Developer tool script. No shebang. |
 | `engine/src/flutter/tools/vscode_workspace/refresh.sh` | Developer tool script. No shebang. |
 
-**Verdict: Real (trivial).** All 4 files are `.sh` files without `#!/bin/bash` or `#!/usr/bin/env bash`. Without a shebang, the behavior depends on the parent shell or `exec()` default — which may not be bash. `sanitizer_suppressions.sh` is a sourced file so the shebang is cosmetic, but the other 3 are intended to be executed directly. Fix is a one-line addition to each file.
+**Deep dive results:**
+
+| File | Execution | Shell features | Shebang needed? |
+|------|-----------|---------------|-----------------|
+| `find-undocumented-ios.sh` | Direct | POSIX-only (`doxygen ... \| grep`) | **Yes** — `#!/bin/sh` or `#!/bin/bash` |
+| `sanitizer_suppressions.sh` | Sourced | Bash-specific (`${BASH_SOURCE[0]}`) | Cosmetic — but `#!/bin/bash` is best practice for editors/linters |
+| `merge.sh` | Direct | POSIX-compatible (`mktemp`, pipes) | **Yes** — `#!/bin/sh` or `#!/bin/bash` |
+| `refresh.sh` | Direct | POSIX-compatible (`mktemp`, pipes) | **Yes** — `#!/bin/sh` or `#!/bin/bash` |
+
+**Repo-wide analysis:** 34 of 38 `.sh` files in `engine/src/flutter/` have shebangs (89%). 31 use `#!/bin/bash`, 2 use `#!/usr/bin/env bash`, 1 uses `#!/boot/bin/sh` (Fuchsia-specific). These 4 files are clear anomalies — the rest of the repo consistently follows the pattern.
+
+**Google Shell Style Guide** is explicit: *"Executables must start with `#!/bin/bash`"* ([shellguide.html](https://google.github.io/styleguide/shellguide.html)). The guide also states *"Bash is the only shell scripting language permitted for executables."*
+
+**Verdict: Real (trivial).** 3 of the 4 files are meant to be executed directly. Without a shebang, behavior depends on the parent shell or `exec()` default — which may not be bash. `sanitizer_suppressions.sh` is sourced so the shebang is cosmetic but still best practice. Fix is a one-line addition to each file.
+
+---
+
+### 7.7 Deep Dive: Invalid zsh syntax in bash script — shellcheck SC2298 — [flutter/flutter#184493](https://github.com/flutter/flutter/issues/184493)
+
+**File:** `engine/src/flutter/tools/fuchsia/devshell/lib/vars.sh`
+
+```bash
+#!/bin/bash
+# ...
+if [[ -n "${ZSH_VERSION:-}" ]]; then
+  devshell_lib_dir=${${(%):-%x}:a:h}    # <-- zsh-only syntax
+else
+  devshell_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+fi
+```
+
+Shellcheck flags:
+- **SC2298**: `${${...}}` — nested parameter expansion is not valid in bash
+- **SC2296**: Parameter expansions can't start with `(` — `${(%):-%x}` is zsh-specific prompt expansion
+
+**Context:** The script has `#!/bin/bash` shebang but contains zsh-specific syntax guarded by `if [[ -n "${ZSH_VERSION:-}" ]]`. This is a polyglot pattern — the zsh branch only executes under zsh, so the code is functionally correct.
+
+**However**, the [Google Shell Style Guide](https://google.github.io/styleguide/shellguide.html) states: *"Bash is the only shell scripting language permitted for executables."* A strict reading would say the zsh branch should be removed, and the script should only support bash. But this is a Fuchsia developer shell script where zsh support is arguably intentional for developer convenience.
+
+The secondary SC2016 warnings (lines 85, 92) are benign — single-quoted strings containing backticks for display purposes, not command substitution.
+
+**Verdict: Low priority.** The polyglot pattern is intentional and functionally correct. A `# shellcheck disable=SC2298,SC2296` comment above the zsh branch would silence the warnings without changing behavior. The zsh support could be flagged as inconsistent with the Google Shell Style Guide, but removing it would reduce developer convenience.
+
+---
+
+### 7.6 Deep Dive: Non-virtual destructors — 64 findings (clang-tidy) — [flutter/flutter#184491](https://github.com/flutter/flutter/issues/184491)
+
+Of 64 `cppcoreguidelines-virtual-class-destructor` findings, ~40 are **false positives** (class inherits virtual destructor from parent/grandparent, or class is `final`). The remaining ~13 need fixes:
+
+**Active UB (highest priority):**
+
+| Class | File | Storage | Risk |
+|-------|------|---------|------|
+| `AccessibilityPlugin` | `shell/platform/windows/accessibility_plugin.h` | `unique_ptr<AccessibilityPlugin>` in `FlutterWindowsEngine` | **UB now** — `delete` through base pointer |
+| `VariableRefreshRateReporter` | `shell/common/variable_refresh_rate_reporter.h` | `shared_ptr<Base>` / `weak_ptr<Base>` | **Fragile** — works by accident via type-erased deleter |
+
+**Cascade fix:**
+- Adding `virtual ~DlOpReceiver() = default;` to `display_list/dl_op_receiver.h` resolves ~10 additional warnings in derived classes (`DlDispatcherBase`, `DlSkCanvasDispatcher`, `DlSkPaintDispatchHelper`, `IgnoreAttributeDispatchHelper`, `IgnoreClipDispatchHelper`, `IgnoreTransformDispatchHelper`, `IgnoreDrawDispatchHelper`, `DisplayListBuilder`, `DlOpSpy`, etc.)
+
+**Preventive fixes (11 classes):** `SnapshotDelegate`, `ServiceProtocol::Handler`, `WindowBindingHandlerDelegate`, `GPUSurfaceGLDelegate`, `GPUSurfaceSoftwareDelegate`, `AtlasGeometry`, `Comparable<T>`, `PathTessellator::VertexWriter`, `PathTessellator::SegmentReceiver`, `TaskRunnerWindow::Delegate`, Fuchsia `Engine::Delegate`
+
+**Prior work:** PR #180288 attempted a similar fix for the `Codec` base class (closed without merging). PR #178682 correctly removed an unnecessary virtual destructor from a `final` class.
+
+**Verdict: 2 active UB bugs, 11 preventive fixes, ~40 false positives.** Fix is trivial: `virtual ~ClassName() = default;` for each affected class.
+
+---
 
 ### By Area
 
