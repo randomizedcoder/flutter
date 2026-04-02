@@ -16,7 +16,19 @@ NativeLibrary::NativeLibrary(const char* path)
     return;
   }
 
-  handle_ = ::LoadLibrary(Utf8ToWideString(path).c_str());
+  // Use LoadLibraryExW with safe search flags to prevent DLL hijacking via
+  // the current working directory (CWE-114). Try System32 first (covers
+  // system DLLs like user32.dll, opengl32.dll, Shcore.dll), then fall back
+  // to default safe directories for app-bundled or user-added DLLs.
+  // LOAD_LIBRARY_SEARCH_DEFAULT_DIRS includes the app directory, System32,
+  // and user-added directories, but NOT the CWD.
+  // See: https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-security
+  handle_ = ::LoadLibraryExW(Utf8ToWideString(path).c_str(), nullptr,
+                              LOAD_LIBRARY_SEARCH_SYSTEM32);
+  if (handle_ == nullptr) {
+    handle_ = ::LoadLibraryExW(Utf8ToWideString(path).c_str(), nullptr,
+                                LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+  }
 }
 
 NativeLibrary::NativeLibrary(Handle handle, bool close_handle)

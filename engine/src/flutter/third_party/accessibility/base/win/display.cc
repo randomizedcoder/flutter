@@ -38,7 +38,10 @@ class ScaleHelperWin32 {
 };
 
 ScaleHelperWin32::ScaleHelperWin32() {
-  if ((shlib_module_ = LoadLibraryA("Shcore.dll")) != nullptr) {
+  // Use LOAD_LIBRARY_SEARCH_SYSTEM32 to prevent DLL hijacking (CWE-114).
+  if ((shlib_module_ = LoadLibraryExA("Shcore.dll", nullptr,
+                                       LOAD_LIBRARY_SEARCH_SYSTEM32)) !=
+      nullptr) {
     scale_factor_for_monitor_supported_ =
         AssignProcAddress(shlib_module_, "GetScaleFactorForMonitor",
                           get_scale_factor_for_monitor_);

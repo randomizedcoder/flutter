@@ -63,11 +63,16 @@ class DpiHelper {
 };
 
 DpiHelper::DpiHelper() {
-  if ((user32_module_ = LoadLibraryA("User32.dll")) != nullptr) {
+  // Use LOAD_LIBRARY_SEARCH_SYSTEM32 to prevent DLL hijacking (CWE-114).
+  if ((user32_module_ = LoadLibraryExA("User32.dll", nullptr,
+                                        LOAD_LIBRARY_SEARCH_SYSTEM32)) !=
+      nullptr) {
     dpi_for_window_supported_ = (AssignProcAddress(
         user32_module_, "GetDpiForWindow", get_dpi_for_window_));
   }
-  if ((shlib_module_ = LoadLibraryA("Shcore.dll")) != nullptr) {
+  if ((shlib_module_ = LoadLibraryExA("Shcore.dll", nullptr,
+                                       LOAD_LIBRARY_SEARCH_SYSTEM32)) !=
+      nullptr) {
     dpi_for_monitor_supported_ = AssignProcAddress(
         shlib_module_, "GetDpiForMonitor", get_dpi_for_monitor_);
   }
